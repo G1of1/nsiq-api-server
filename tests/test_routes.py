@@ -4,13 +4,13 @@ import hashlib
 def test_health_check(client):
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert response.json()["status"] == "ok"
 
 
 def test_assessment_requires_authorization(client):
     response = client.post("/scan/assess", json={"target": "example.com", "authorized": False})
-    assert response.status_code == 200
-    assert "must confirm authorization" in response.json()["error"]
+    assert response.status_code == 403
+    assert "must confirm authorization" in response.json()["detail"]
 
 
 def test_assessment_returns_structured_result(client, monkeypatch):
@@ -24,15 +24,16 @@ def test_assessment_returns_structured_result(client, monkeypatch):
 def test_assessment_returns_validation_error(client, monkeypatch):
     monkeypatch.setattr("src.routes.scan.security.assess", lambda *_: (_ for _ in ()).throw(ValueError("not public")))
     response = client.post("/scan/assess", json={"target": "localhost", "authorized": True})
-    assert response.json() == {"error": "not public"}
+    assert response.status_code == 400
+    assert response.json() == {"detail": "not public"}
 
 
 def test_direct_port_scan_is_authorized_and_bounded(client, monkeypatch):
     monkeypatch.setattr("src.routes.scan.security.validate_public_target", lambda host: ("example.com", ["93.184.216.34"]))
-    monkeypatch.setattr("src.routes.scan.security.check_ports", lambda host, ports: [443])
+    monkeypatch.setattr("src.routes.scan.security.check_ports", lambda host, addresses, ports: [443])
     rejected = client.post("/scan/scan", json={"host": "example.com", "ports": [443], "authorized": False})
     accepted = client.post("/scan/scan", json={"host": "example.com", "ports": [443], "authorized": True})
-    assert "error" in rejected.json()
+    assert rejected.status_code == 403
     assert accepted.json() == {"host": "example.com", "open_ports": [443]}
 
 
@@ -47,6 +48,13 @@ def test_domain_validation_route(client, monkeypatch):
     response = client.post("/tools/validate", json={"domain": "example.com"})
     assert response.status_code == 200
     assert response.json() == expected
+
+
+def test_domain_validation_route_returns_bad_request(client, monkeypatch):
+    monkeypatch.setattr("src.routes.tools.validate.validate_domain", lambda domain: {"error": "not public"})
+    response = client.post("/tools/validate", json={"domain": "localhost"})
+    assert response.status_code == 400
+    assert response.json() == {"detail": "not public"}
 
 
 def test_log_route_accepts_log_and_returns_findings(client, monkeypatch):

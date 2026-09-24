@@ -54,7 +54,7 @@ def test_check_ports_filters_allowlist_and_collects_reachable_ports(monkeypatch)
         raise OSError("closed")
 
     monkeypatch.setattr(security.socket, "create_connection", create_connection)
-    assert security.check_ports("example.com", [443, 9999, 22]) == [443]
+    assert security.check_ports("example.com", ["8.8.8.8"], [443, 9999, 22]) == [443]
     assert [call[0][1] for call in calls] == [443, 22]
 
 
@@ -68,49 +68,53 @@ def test_certificate_finding_reports_expiring_and_invalid_certificates(monkeypat
 
     monkeypatch.setattr(security.socket, "create_connection", lambda *_args, **_kwargs: FakeConnection())
     monkeypatch.setattr(security.ssl, "create_default_context", lambda: Context())
-    finding = security.certificate_finding("example.com")
+    finding = security.certificate_finding("example.com", ["8.8.8.8"])
     assert finding["severity"] == "high"
     assert finding["title"] == "TLS certificate expires soon"
 
     monkeypatch.setattr(security.socket, "create_connection", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("no tls")))
-    assert security.certificate_finding("example.com")["title"] == "TLS certificate could not be verified"
+    assert security.certificate_finding("example.com", ["8.8.8.8"])["title"] == "TLS certificate could not be verified"
 
 
 def test_header_findings_detect_missing_headers_and_ignores_request_failures(monkeypatch):
-    class Response(FakeConnection):
-        headers = {"Strict-Transport-Security": "max-age=1", "X-Frame-Options": "DENY"}
+    class Response:
+        def getheaders(self):
+            return [("Strict-Transport-Security", "max-age=1"), ("X-Frame-Options", "DENY")]
+        def read(self):
+            return b""
+    class Connection:
+        def request(self, *_args, **_kwargs): pass
+        def getresponse(self): return Response()
+        def close(self): pass
 
-    monkeypatch.setattr(security, "urlopen", lambda *_args, **_kwargs: Response())
-    titles = [item["title"] for item in security.header_findings("example.com")]
+    monkeypatch.setattr(security, "_PinnedHTTPSConnection", lambda *_args, **_kwargs: Connection())
+    titles = [item["title"] for item in security.header_findings("example.com", ["8.8.8.8"])]
     assert "Missing strict-transport-security" not in titles
     assert "Missing x-frame-options" not in titles
     assert "Missing content-security-policy" in titles
 
-    monkeypatch.setattr(security, "urlopen", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("offline")))
-    assert security.header_findings("example.com") == []
+    monkeypatch.setattr(security, "_PinnedHTTPSConnection", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("offline")))
+    assert security.header_findings("example.com", ["8.8.8.8"]) == []
 
 
 def test_assessment_scores_findings_and_persists_history(monkeypatch, tmp_path):
-    data_file = tmp_path / "assessments.json"
-    monkeypatch.setattr(security, "DATA_FILE", data_file)
+    monkeypatch.setenv("NSIQ_DATABASE_PATH", str(tmp_path / "assessments.db"))
     monkeypatch.setattr(security, "validate_public_target", lambda target: ("example.com", ["93.184.216.34"]))
-    monkeypatch.setattr(security, "check_ports", lambda host, ports: [443, 3389])
-    monkeypatch.setattr(security, "certificate_finding", lambda host: security.finding("medium", "TLS certificate expires soon", "soon", "renew"))
-    monkeypatch.setattr(security, "header_findings", lambda host: [security.finding("low", "Missing header", "missing", "add")])
+    monkeypatch.setattr(security, "check_ports", lambda host, addresses, ports: [443, 3389])
+    monkeypatch.setattr(security, "certificate_finding", lambda host, addresses: security.finding("medium", "TLS certificate expires soon", "soon", "renew"))
+    monkeypatch.setattr(security, "header_findings", lambda host, addresses: [security.finding("low", "Missing header", "missing", "add")])
 
     assessment = security.assess("example.com", [443, 3389])
     assert assessment["risk_score"] == 38
     assert assessment["open_ports"] == [443, 3389]
     assert len(security.history_items()) == 1
 
-    data_file.write_text("not json", encoding="utf-8")
-    assert security.history_items() == []
 
 
 def test_history_is_limited_to_fifty_items(monkeypatch, tmp_path):
-    monkeypatch.setattr(security, "DATA_FILE", tmp_path / "history.json")
+    monkeypatch.setenv("NSIQ_DATABASE_PATH", str(tmp_path / "history.db"))
     for index in range(51):
-        security._save_assessment({"id": str(index)})
+        security._save_assessment({"id": str(index), "scanned_at": f"2026-01-01T00:00:{index:02d}+00:00"})
     history = security.history_items()
     assert len(history) == 50
     assert history[0]["id"] == "50"

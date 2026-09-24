@@ -1,41 +1,40 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from src.services import security
 from src.schema import AssessmentRequest
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 router = APIRouter()
 
 class PortScanInput(BaseModel):
-    host: str
-    ports: list[int]
+    host: str = Field(min_length=1, max_length=253)
+    ports: list[int] = Field(max_length=20)
     authorized: bool
 
 
 @router.post('/scan')
 def portScan(data: PortScanInput):
     if not data.authorized:
-        return {"error": "You must confirm authorization before assessing an asset."}
+        raise HTTPException(403, "You must confirm authorization before assessing an asset.")
     try:
-        host, _ = security.validate_public_target(data.host)
-        return {"host": host, "open_ports": security.check_ports(host, data.ports)}
+        host, addresses = security.validate_public_target(data.host)
+        security.enforce_target_allowlist(host)
+        return {"host": host, "open_ports": security.check_ports(host, addresses, data.ports)}
     except ValueError as exc:
-        return {"error": str(exc)}
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.post('/assess')
 def assess_public_asset(data: AssessmentRequest):
     if not data.authorized:
-        return {"error": "You must confirm authorization before assessing an asset."}
+        raise HTTPException(403, "You must confirm authorization before assessing an asset.")
     try:
         return {"result": security.assess(data.target, data.ports)}
     except ValueError as exc:
-        return {"error": str(exc)}
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.get('/history')
 def assessment_history():
     return {"result": security.history_items()}
-
-
 
 
