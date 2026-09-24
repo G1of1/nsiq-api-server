@@ -1,5 +1,6 @@
 import re
 from collections import Counter
+from src.services.gemini import enrich_log
 
 IP_PATTERN = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 
@@ -16,3 +17,7 @@ def analyze_log(content: str) -> dict:
     if suspicious_paths:
         findings.append({"severity": "medium", "title": "Web probing indicators", "evidence": f"{len(suspicious_paths)} requests matched common reconnaissance paths.", "remediation": "Review web-server logs, patch exposed applications, and tune WAF rules."})
     return {"lines_analyzed": len(lines), "failed_auth_events": len(failed_auth), "findings": findings}
+
+
+async def enrich_with_gemini(content: str, deterministic_result: dict) -> dict:
+    return await enrich_log(content, deterministic_result)

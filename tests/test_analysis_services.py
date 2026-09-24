@@ -5,6 +5,7 @@ import pytest
 from fastapi import HTTPException, UploadFile
 
 from src.services import logs, validate, virus
+from src.services import gemini
 
 
 def test_log_analysis_detects_brute_force_and_web_probing():
@@ -38,3 +39,16 @@ def test_file_intake_returns_metadata_and_enforces_limit():
     with pytest.raises(HTTPException) as error:
         asyncio.run(virus.virus_scan(large_upload))
     assert error.value.status_code == 413
+
+
+def test_gemini_enrichment_is_disabled_without_explicit_configuration(monkeypatch):
+    monkeypatch.setenv("NSIQ_GEMINI_ENABLED", "false")
+    result = asyncio.run(gemini.enrich_log("password=hunter2", {"findings": []}))
+    assert result["status"] == "disabled"
+
+
+def test_gemini_redacts_common_secret_patterns():
+    redacted = gemini._redact("Authorization: Bearer abc123 password=secret api_key: value")
+    assert "abc123" not in redacted
+    assert "secret" not in redacted
+    assert "value" not in redacted
