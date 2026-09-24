@@ -6,6 +6,24 @@ from fastapi import HTTPException, UploadFile
 
 from src.services import logs, validate, virus
 from src.services import gemini
+from src.services import diagnostics
+
+
+def test_system_stats_are_formatted(monkeypatch):
+    memory = type("Memory", (), {
+        "used": 5 * 1024**3,
+        "total": 16 * 1024**3,
+    })()
+    disk = type("Disk", (), {"percent": 42.4})()
+    monkeypatch.setattr(diagnostics.psutil, "cpu_percent", lambda interval: 7.125)
+    monkeypatch.setattr(diagnostics.psutil, "virtual_memory", lambda: memory)
+    monkeypatch.setattr(diagnostics.psutil, "disk_usage", lambda path: disk)
+
+    assert diagnostics.get_system_stats() == {
+        "cpu_usage": "7.12%",
+        "memory": "5GB/16.00GB",
+        "disk": "42%",
+    }
 
 
 def test_log_analysis_detects_brute_force_and_web_probing():
