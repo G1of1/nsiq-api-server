@@ -1,5 +1,5 @@
-from fastapi import APIRouter, HTTPException
-from src.services import security
+from fastapi import APIRouter, HTTPException, UploadFile, File
+from src.services import security, virus
 from src.schema import AssessmentRequest
 from pydantic import BaseModel, Field
 
@@ -11,7 +11,7 @@ class PortScanInput(BaseModel):
     authorized: bool
 
 
-@router.post('/scan')
+@router.post('/port-scan')
 def portScan(data: PortScanInput):
     if not data.authorized:
         raise HTTPException(403, "You must confirm authorization before assessing an asset.")
@@ -21,6 +21,10 @@ def portScan(data: PortScanInput):
         return {"host": host, "open_ports": security.check_ports(host, addresses, data.ports)}
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+
+@router.post("/virus-scan")
+async def scan_file(file: UploadFile = File(...)):
+    return await virus.virus_scan(file)
 
 
 @router.post('/assess')

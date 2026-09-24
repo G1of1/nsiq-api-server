@@ -8,7 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from src.config import get_settings
-from src.routes import tools, logs, scan, virus
+from src.routes import tools, logs, scan
 
 settings = get_settings()
 app = FastAPI(title="NetSek IQ API", version="1.1.0", description="Authorized public-asset assessment and log triage API.")
@@ -41,12 +41,11 @@ async def protect_api(request: Request, call_next):
         bucket.append(now)
     return await call_next(request)
 
-app.include_router(tools.router, prefix="/tools")
-app.include_router(logs.router, prefix="/logs")
-app.include_router(scan.router, prefix="/scan")
-app.include_router(virus.router, prefix="/virus")
+app.include_router(tools.router, prefix="/api/v1/tools")
+app.include_router(logs.router, prefix="/api/v1/logs")
+app.include_router(scan.router, prefix="/api/v1/scan")
 
-@app.get("/health")
+@app.get("/api/v1/health")
 def health():
     return {"status": "ok", "environment": settings.environment}
 
